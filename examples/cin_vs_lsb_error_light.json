@@ -4,9 +4,14 @@
   "ltspice_exe": "C:/Users/vosahlov/AppData/Local/Programs/ADI/LTspice/LTspice.exe",
   "output_dir": "C:\\Users\\vosahlov\\Documents\\ltspice-multithread",
   "basename": "sweep",
-  "workers": 10,
+  "workers": 18,
   "timeout": 600,
   "params": [
+    {
+      "name": "Vin",
+      "kind": "list",
+      "axis": "\u2014"
+    },
     {
       "name": "Rin",
       "kind": "list",
@@ -22,14 +27,78 @@
     {
       "name": "Ileak",
       "kind": "list",
-      "spec": "0 1u",
+      "spec": "0 0.25u 0.5u 0.75u 1u",
       "axis": "cols"
+    },
+    {
+      "name": "Cadc",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "Radc",
+      "kind": "list",
+      "axis": "\u2014"
     },
     {
       "name": "ADC_SMPL_CYCLES",
       "kind": "list",
-      "spec": "144 480",
-      "axis": "file"
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_CLOCK",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_PRESCALER",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_NBITS",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_NCHANNELS",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_VREF",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_SETTLE_THRESHOLD",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_LSB",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_PERIOD",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "ADC_SMPL_TIME",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "DATA_SAVE_START",
+      "kind": "list",
+      "axis": "\u2014"
+    },
+    {
+      "name": "MIN_TIME_STEP",
+      "kind": "list",
+      "axis": "\u2014"
     }
   ]
 }

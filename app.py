@@ -140,18 +140,14 @@ class App:
         self.cancel_btn = ttk.Button(bot, text='Cancel', command=self.cancel_sweep, state='disabled')
         self.cancel_btn.grid(row=0, column=13, padx=5)
 
+        # Status bar — pack before log so side='bottom' is claimed first
         self.status_var = tk.StringVar(value='Idle')
-        ttk.Label(bot, textvariable=self.status_var).grid(row=0, column=14, padx=10, sticky='w')
-        bot.columnconfigure(14, weight=1)
-
-        # Progress bar on its own row, full width
-        prog_frame = ttk.Frame(self.root, padding=(10, 2, 10, 8))
-        prog_frame.pack(fill='x')
-        self.progress = ttk.Progressbar(prog_frame, mode='determinate')
-        self.progress.pack(fill='x')
+        status_bar = ttk.Frame(self.root, relief='sunken', padding=(6, 2))
+        status_bar.pack(fill='x', side='bottom')
+        ttk.Label(status_bar, textvariable=self.status_var, anchor='w').pack(fill='x')
 
         log_frame = ttk.LabelFrame(self.root, text='Log', padding=5)
-        log_frame.pack(fill='both', expand=False, padx=10, pady=(0, 10))
+        log_frame.pack(fill='both', expand=False, padx=10, pady=(0, 4))
         self.log_txt = tk.Text(log_frame, height=8, wrap='word', state='disabled')
         self.log_txt.pack(fill='both', expand=True, side='left')
         sb2 = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_txt.yview)
@@ -195,7 +191,10 @@ class App:
         self.params = []
         for name, default in params_defaults.items():
             if name in existing:
-                self.params.append(existing[name])
+                p = dict(existing[name])
+                if p['axis'] == '—':
+                    p['spec'] = default if default is not None else '1'
+                self.params.append(p)
             else:
                 # New param: default spec from schematic value, axis=— (skip)
                 self.params.append({
@@ -361,8 +360,6 @@ class App:
         self._cancel.clear()
         self.run_btn.config(state='disabled')
         self.cancel_btn.config(state='normal')
-        self.progress['maximum'] = total
-        self.progress['value'] = 0
         self.status_var.set(f'Running 0/{total}')
         self.log(f'Starting sweep: {total} combinations, {self.workers_var.get()} workers.')
 
@@ -423,7 +420,6 @@ class App:
         return ', '.join(f'{k}={stepping.format_value(v)}' for k, v in values.items())
 
     def _on_progress(self, done, tot):
-        self.progress['value'] = done
         self.status_var.set(f'Running {done}/{tot}')
 
     def _finish(self, msg, detail=None):
@@ -465,7 +461,10 @@ class App:
             'basename': self.basename_var.get(),
             'workers': self.workers_var.get(),
             'timeout': self.timeout_var.get(),
-            'params': self.params,
+            'params': [
+                {k: v for k, v in p.items() if k != 'spec'} if p['axis'] == '—' else p
+                for p in self.params
+            ],
         }
         try:
             Path(path).write_text(json.dumps(cfg, indent=2), encoding='utf-8')
@@ -517,23 +516,8 @@ class App:
                 'axis': p.get('axis', 'rows'),
             })
         self.params = normalized
-        self.refresh_tree()
-        self.log(f'Loaded setup ← {path} ({len(self.params)} param(s))')
-
-        # If schematic exists, sanity-check that saved params still match it.
-        asc = self.asc_path_var.get()
-        if asc and Path(asc).exists():
-            try:
-                detected = set(schematic.find_parameters(asc))
-                saved = {p['name'] for p in self.params}
-                missing = sorted(saved - detected)
-                extra = sorted(detected - saved)
-                if missing:
-                    self.log(f'  warning: saved params not in schematic: {", ".join(missing)}')
-                if extra:
-                    self.log(f'  note: schematic has new params not in setup: {", ".join(extra)}')
-            except Exception:  # pylint: disable=broad-except
-                pass
+        self.log(f'Loaded setup ← {path} ({len(normalized)} param(s))')
+        self.load_params()  # refreshes specs for axis=— params from .asc
 
 
 def main():
