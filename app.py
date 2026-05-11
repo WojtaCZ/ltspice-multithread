@@ -113,7 +113,7 @@ class App:
         bot.pack(fill='x')
 
         ttk.Label(bot, text='Workers:').grid(row=0, column=0)
-        self.workers_var = tk.IntVar(value=max(1, (os.cpu_count() or 4) // 2))
+        self.workers_var = tk.IntVar(value=max(1, (os.cpu_count() or 2) - 1))
         ttk.Spinbox(bot, from_=1, to=64, textvariable=self.workers_var, width=5).grid(
             row=0, column=1, padx=(2, 15)
         )
