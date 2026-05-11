@@ -70,12 +70,15 @@ class App:
         self.out_var = tk.StringVar(value=str(Path.cwd()))
         ttk.Entry(top, textvariable=self.out_var).grid(row=2, column=1, sticky='ew', padx=5)
         ttk.Button(top, text='Browse…', command=self.browse_out).grid(row=2, column=2)
-        ttk.Label(top, text='Format:').grid(row=2, column=3, sticky='w', padx=(12, 2), pady=2)
+
+        ttk.Label(top, text='Format:').grid(row=3, column=0, sticky='w', pady=2)
         _fmt_values = ['CSV', 'MAT (Octave)'] if output.SCIPY_AVAILABLE else ['CSV']
-        self.fmt_var = tk.StringVar(value='CSV')
+        _fmt_default = 'MAT (Octave)' if output.SCIPY_AVAILABLE else 'CSV'
+        self.fmt_var = tk.StringVar(value=_fmt_default)
         ttk.Combobox(
             top, textvariable=self.fmt_var, values=_fmt_values, state='readonly', width=14,
-        ).grid(row=2, column=4, sticky='w', pady=2)
+        ).grid(row=3, column=1, sticky='w', pady=2)
+        self.fmt_var.trace_add('write', lambda *_: self.refresh_tree())
 
         mid = ttk.LabelFrame(self.root, text='Parameters (double-click row to edit)', padding=10)
         mid.pack(fill='both', expand=True, padx=10, pady=5)
@@ -87,6 +90,7 @@ class App:
             self.tree.column(c, width=w, anchor='w')
         self.tree.pack(fill='both', expand=True, side='left')
         self.tree.tag_configure('skipped', foreground='#999')
+        self.tree.tag_configure('axis_na', foreground='#aaa')
 
         sb = ttk.Scrollbar(mid, orient='vertical', command=self.tree.yview)
         sb.pack(side='right', fill='y')
@@ -99,7 +103,7 @@ class App:
             foreground='#666',
             text=(
                 'Kinds: list ("1k 2.2k 10k") · lin/dec/oct ("start stop N"). '
-                'Axis — = skip (keep schematic default) · rows · cols · file (separate CSV per value).'
+                'Double-click a row to configure. Axis (CSV only): rows · cols · file.'
             ),
         )
         hint.pack(anchor='w', padx=10)
@@ -186,16 +190,16 @@ class App:
         for name, default in params_defaults.items():
             if name in existing:
                 p = dict(existing[name])
-                if p['axis'] == '—':
+                if not p.get('override'):
                     p['spec'] = default if default is not None else '1'
                 self.params.append(p)
             else:
-                # New param: default spec from schematic value, axis=— (skip)
                 self.params.append({
                     'name': name,
                     'kind': 'list',
                     'spec': default if default is not None else '1',
-                    'axis': '—',
+                    'axis': 'rows',
+                    'override': False,
                 })
         self.refresh_tree()
         names = list(params_defaults.keys())
@@ -203,14 +207,21 @@ class App:
 
     def refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
+        mat_mode = self.fmt_var.get() == 'MAT (Octave)'
         for p in self.params:
-            skipped = p['axis'] == '—'
-            preview = '(schematic default)' if skipped else self.preview(p)
-            tag = ('skipped',) if skipped else ()
+            overriding = p.get('override', False)
+            if not overriding:
+                preview = '(schematic default)'
+                axis_display = '—'
+                tag = ('skipped',)
+            else:
+                preview = self.preview(p)
+                axis_display = '—' if mat_mode else p.get('axis', 'rows')
+                tag = ('axis_na',) if mat_mode else ()
             self.tree.insert(
                 '',
                 'end',
-                values=(p['name'], p['kind'], p['spec'], p['axis'], preview),
+                values=(p['name'], p['kind'], p['spec'], axis_display, preview),
                 tags=tag,
             )
 
@@ -236,7 +247,7 @@ class App:
     def _open_editor(self, p):
         dlg = tk.Toplevel(self.root)
         dlg.title(f'Edit "{p["name"]}"')
-        dlg.geometry('520x270')
+        dlg.geometry('520x300')
         dlg.transient(self.root)
         dlg.grab_set()
 
@@ -246,20 +257,29 @@ class App:
         body.pack(fill='both', expand=True)
         body.columnconfigure(1, weight=1)
 
-        ttk.Label(body, text='Kind:').grid(row=0, column=0, sticky='w', pady=3)
-        kind_var = tk.StringVar(value=p['kind'])
-        ttk.Combobox(
-            body, textvariable=kind_var,
-            values=['list', 'lin', 'dec', 'oct'], state='readonly', width=12,
+        # Override checkbox — auto-enabled when the dialog opens.
+        override_var = tk.BooleanVar(value=True)
+        ttk.Label(body, text='Override:').grid(row=0, column=0, sticky='w', pady=3)
+        ttk.Checkbutton(
+            body, text='Override schematic default', variable=override_var,
         ).grid(row=0, column=1, sticky='w', pady=3)
 
-        ttk.Label(body, text='Spec:').grid(row=1, column=0, sticky='w', pady=3)
+        ttk.Label(body, text='Kind:').grid(row=1, column=0, sticky='w', pady=3)
+        kind_var = tk.StringVar(value=p['kind'])
+        kind_cb = ttk.Combobox(
+            body, textvariable=kind_var,
+            values=['list', 'lin', 'dec', 'oct'], state='readonly', width=12,
+        )
+        kind_cb.grid(row=1, column=1, sticky='w', pady=3)
+
+        ttk.Label(body, text='Spec:').grid(row=2, column=0, sticky='w', pady=3)
         spec_var = tk.StringVar(value=p['spec'])
-        ttk.Entry(body, textvariable=spec_var).grid(row=1, column=1, sticky='ew', pady=3)
+        spec_entry = ttk.Entry(body, textvariable=spec_var)
+        spec_entry.grid(row=2, column=1, sticky='ew', pady=3)
 
         hint_var = tk.StringVar()
         ttk.Label(body, textvariable=hint_var, foreground='#666').grid(
-            row=2, column=1, sticky='w', pady=3
+            row=3, column=1, sticky='w', pady=3
         )
 
         def upd_hint(*_):
@@ -273,38 +293,50 @@ class App:
         kind_var.trace_add('write', upd_hint)
         upd_hint()
 
-        ttk.Label(body, text='Axis:').grid(row=3, column=0, sticky='w', pady=3)
-        axis_var = tk.StringVar(value=p['axis'])
-        ttk.Combobox(
+        mat_mode = self.fmt_var.get() == 'MAT (Octave)'
+
+        ttk.Label(body, text='Axis:').grid(row=4, column=0, sticky='w', pady=3)
+        axis_var = tk.StringVar(value=p.get('axis', 'rows'))
+        axis_cb = ttk.Combobox(
             body, textvariable=axis_var,
-            values=['—', 'rows', 'cols', 'file'], state='readonly', width=12,
-        ).grid(row=3, column=1, sticky='w', pady=3)
+            values=['rows', 'cols', 'file'], state='readonly', width=12,
+        )
+        axis_cb.grid(row=4, column=1, sticky='w', pady=3)
 
         preview_var = tk.StringVar()
         ttk.Label(body, textvariable=preview_var, foreground='#048', wraplength=460).grid(
-            row=4, column=0, columnspan=2, sticky='w', pady=(8, 0)
+            row=5, column=0, columnspan=2, sticky='w', pady=(8, 0)
         )
 
         def upd_preview(*_):
-            tmp = {
-                'name': p['name'],
-                'kind': kind_var.get(),
-                'spec': spec_var.get(),
-                'axis': axis_var.get(),
-            }
-            preview_var.set('Preview: ' + self.preview(tmp))
+            preview_var.set('Preview: ' + self.preview({
+                'name': p['name'], 'kind': kind_var.get(), 'spec': spec_var.get(),
+            }))
 
         kind_var.trace_add('write', upd_preview)
         spec_var.trace_add('write', upd_preview)
         upd_preview()
 
+        def upd_state(*_):
+            overriding = override_var.get()
+            kind_cb.config(state='readonly' if overriding else 'disabled')
+            spec_entry.config(state='normal' if overriding else 'disabled')
+            # Axis is disabled both when not overriding AND when in MAT mode.
+            axis_cb.config(state='disabled' if (mat_mode or not overriding) else 'readonly')
+
+        override_var.trace_add('write', upd_state)
+        upd_state()
+
         btns = ttk.Frame(dlg, padding=(0, 5))
         btns.pack(pady=8)
 
         def save():
-            p['kind'] = kind_var.get()
-            p['spec'] = spec_var.get()
-            p['axis'] = axis_var.get()
+            p['override'] = override_var.get()
+            if override_var.get():
+                p['kind'] = kind_var.get()
+                p['spec'] = spec_var.get()
+                if not mat_mode:
+                    p['axis'] = axis_var.get()
             self.refresh_tree()
             dlg.destroy()
 
@@ -330,7 +362,7 @@ class App:
 
         value_lists: dict[str, list[float]] = {}
         for p in self.params:
-            if p['axis'] == '—':
+            if not p.get('override'):
                 continue  # keep schematic default, do not substitute
             try:
                 vals = stepping.generate(stepping.parse_spec(p['kind'], p['spec']))
@@ -368,7 +400,10 @@ class App:
 
         def worker():
             try:
-                axes = {p['name']: p['axis'] for p in self.params if p['axis'] != '—'}
+                if fmt_mat:
+                    axes = {p['name']: 'rows' for p in self.params if p.get('override')}
+                else:
+                    axes = {p['name']: p.get('axis', 'rows') for p in self.params if p.get('override')}
                 results = runner.run_all(
                     self.asc_path_var.get(),
                     combos,
@@ -470,7 +505,7 @@ class App:
             'workers': self.workers_var.get(),
             'timeout': self.timeout_var.get(),
             'params': [
-                {k: v for k, v in p.items() if k != 'spec'} if p['axis'] == '—' else p
+                {k: v for k, v in p.items() if k != 'spec'} if not p.get('override') else dict(p)
                 for p in self.params
             ],
         }
@@ -517,15 +552,24 @@ class App:
         for p in params:
             if not isinstance(p, dict) or 'name' not in p:
                 continue
+            old_axis = p.get('axis', 'rows')
+            if 'override' in p:
+                p_override = bool(p['override'])
+                p_axis = old_axis if old_axis != '—' else 'rows'
+            else:
+                # Backward compat: old configs used axis='—' to mean "don't override".
+                p_override = (old_axis != '—')
+                p_axis = old_axis if old_axis != '—' else 'rows'
             normalized.append({
                 'name': str(p['name']),
                 'kind': p.get('kind', 'list'),
                 'spec': str(p.get('spec', '1')),
-                'axis': p.get('axis', 'rows'),
+                'axis': p_axis,
+                'override': p_override,
             })
         self.params = normalized
         self.log(f'Loaded setup ← {path} ({len(normalized)} param(s))')
-        self.load_params()  # refreshes specs for axis=— params from .asc
+        self.load_params()  # refreshes specs for non-overriding params from .asc
 
 
 def main():
