@@ -23,10 +23,55 @@ PARAM_DIRECTIVE_RE = re.compile(r'\.param\b\s+(.+)', re.IGNORECASE)
 # Within a .param body: NAME=value where value is either {expression} or a
 # non-whitespace token that does NOT include a literal \n (the two-char sequence
 # backslash + n used by LTSpice to encode newlines inside TEXT directives).
-PARAM_NAME_VALUE_RE = re.compile(r'(\w+)\s*=\s*(\{[^}]*\}|(?:(?!\\n)\S)+)')
+# The {expression} alternative supports one level of nesting so that values
+# like {ADC_VREF/{pow(2, {ADC_NBITS})-1}} are matched in full.
+PARAM_NAME_VALUE_RE = re.compile(
+    r'(\w+)\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|(?:(?!\\n)\S)+)'
+)
 
 # Back-compat alias for any external callers.
 PARAM_RE = BRACE_RE
+
+
+def _iter_param_assignments(body: str):
+    """Yield (name, value) pairs from a .param body.
+
+    Handles values that contain spaces or multiple levels of nested braces, e.g.
+    ``STEP=ADC_VREF/{pow(2, {ADC_NBITS})-1}`` or ``STEP={outer/{pow(2, {N})-1}}``.
+
+    Strategy: scan at brace-depth 0 for top-level NAME= anchors, then take
+    everything between consecutive anchors as the preceding name's value.
+    """
+    n = len(body)
+    depth = 0
+    anchors: list[tuple[str, int, int]] = []  # (name, name_pos, val_start)
+    i = 0
+    while i < n:
+        c = body[i]
+        if c == '{':
+            depth += 1
+            i += 1
+        elif c == '}':
+            depth = max(0, depth - 1)
+            i += 1
+        elif depth == 0:
+            m = re.match(r'([A-Za-z_]\w*)\s*=', body[i:])
+            # Guard: don't match mid-identifier (e.g. the 'NBITS' part of 'ADC_NBITS').
+            if m and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == '_')):
+                anchors.append((m.group(1), i, i + m.end()))
+                i += m.end()
+            else:
+                i += 1
+        else:
+            i += 1
+
+    for idx, (name, name_pos, val_start) in enumerate(anchors):
+        raw_end = anchors[idx + 1][1] if idx + 1 < len(anchors) else n
+        raw = body[val_start:raw_end]
+        # Strip LTSpice in-line \n separator (literal backslash + n) and trailing ws.
+        nl = raw.find('\\n')
+        value = (raw[:nl] if nl >= 0 else raw).rstrip()
+        yield name, value
 
 
 def _param_names_in_text(text: str) -> list[str]:
@@ -79,10 +124,9 @@ def find_parameters_with_defaults(asc_path: str | Path) -> dict[str, str | None]
         m = PARAM_DIRECTIVE_RE.search(line)
         if not m:
             continue
-        for nm in PARAM_NAME_VALUE_RE.finditer(m.group(1)):
-            name = nm.group(1)
+        for name, value in _iter_param_assignments(m.group(1)):
             if name not in result:
-                result[name] = nm.group(2)
+                result[name] = value or None
     # Bare {NAME} references not already captured
     for m in BRACE_RE.finditer(text):
         name = m.group(1)
