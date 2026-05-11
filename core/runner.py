@@ -13,6 +13,34 @@ from . import logparser, schematic, stepping
 
 TEMP_PREFIX = 'ltsweep_'
 
+# --- Process registry for instant cancel ---
+_active_procs: set[subprocess.Popen] = set()
+_active_procs_lock = threading.Lock()
+_cancel_flag = threading.Event()
+
+
+def kill_all_active() -> None:
+    """Kill every LTSpice process that is currently running."""
+    _cancel_flag.set()
+    with _active_procs_lock:
+        procs = list(_active_procs)
+    for p in procs:
+        try:
+            if p.poll() is None:
+                p.kill()
+        except OSError:
+            pass
+
+
+def _register(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        _active_procs.add(proc)
+
+
+def _deregister(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        _active_procs.discard(proc)
+
 
 def _format_substitutions(values: dict[str, float]) -> dict[str, str]:
     return {k: stepping.format_value(v) for k, v in values.items()}
@@ -46,6 +74,10 @@ def run_single(
     timeout: float = 600,
 ) -> dict:
     """Run one LTSpice simulation. Returns {values, measurements, error, stderr}."""
+    # Skip immediately if cancel was already requested.
+    if _cancel_flag.is_set():
+        return {'values': values, 'measurements': {}, 'error': 'cancelled', 'stderr': ''}
+
     asc_template = Path(asc_template_path)
     template_text = asc_template.read_text(encoding='utf-8', errors='replace')
     patched = schematic.substitute(template_text, _format_substitutions(values))
@@ -64,12 +96,17 @@ def run_single(
             text=True,
             cwd=str(asc_template.parent),
         )
+        _register(proc)
+
         try:
             _, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.communicate()  # drain pipes so the process fully exits
+            proc.communicate()
             return {'values': values, 'measurements': {}, 'error': 'timeout', 'stderr': ''}
+
+        if _cancel_flag.is_set():
+            return {'values': values, 'measurements': {}, 'error': 'cancelled', 'stderr': ''}
 
         log_file = temp_asc.with_suffix('.log')
         measurements: dict[str, float] = {}
@@ -91,13 +128,14 @@ def run_single(
     except Exception as e:  # pylint: disable=broad-except
         return {'values': values, 'measurements': {}, 'error': str(e), 'stderr': ''}
     finally:
-        # Ensure the process is dead before touching its files.
-        if proc is not None and proc.poll() is None:
-            proc.kill()
-            try:
-                proc.communicate(timeout=10)
-            except Exception:  # pylint: disable=broad-except
-                pass
+        if proc is not None:
+            _deregister(proc)
+            if proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=10)
+                except Exception:  # pylint: disable=broad-except
+                    pass
         _cleanup(asc_template.parent, tag)
 
 
@@ -112,6 +150,7 @@ def run_all(
     timeout: float = 600,
 ) -> list[dict]:
     """Run all parameter combinations in parallel. Returns list of result dicts."""
+    _cancel_flag.clear()
     results: list[dict] = []
     total = len(value_combos)
 
@@ -122,7 +161,7 @@ def run_all(
         }
         for fut in as_completed(futures):
             if cancel_event is not None and cancel_event.is_set():
-                fut.cancel()
+                _cancel_flag.set()
                 continue
             try:
                 r = fut.result()

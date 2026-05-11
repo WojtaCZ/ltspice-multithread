@@ -121,15 +121,28 @@ class App:
 
         ttk.Separator(bot, orient='vertical').grid(row=0, column=8, sticky='ns', padx=8)
 
+        self.fmt_csv_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bot, text='CSV', variable=self.fmt_csv_var).grid(row=0, column=9, padx=2)
+
+        self.fmt_mat_var = tk.BooleanVar(value=False)
+        mat_cb = ttk.Checkbutton(bot, text='MAT (Octave)', variable=self.fmt_mat_var)
+        mat_cb.grid(row=0, column=10, padx=2)
+        if not output.SCIPY_AVAILABLE:
+            self.fmt_mat_var.set(False)
+            mat_cb.config(state='disabled')
+            mat_cb.config(text='MAT (needs scipy)')
+
+        ttk.Separator(bot, orient='vertical').grid(row=0, column=11, sticky='ns', padx=8)
+
         self.run_btn = ttk.Button(bot, text='Run sweep', command=self.run_sweep)
-        self.run_btn.grid(row=0, column=9)
+        self.run_btn.grid(row=0, column=12)
 
         self.cancel_btn = ttk.Button(bot, text='Cancel', command=self.cancel_sweep, state='disabled')
-        self.cancel_btn.grid(row=0, column=10, padx=5)
+        self.cancel_btn.grid(row=0, column=13, padx=5)
 
         self.status_var = tk.StringVar(value='Idle')
-        ttk.Label(bot, textvariable=self.status_var).grid(row=0, column=11, padx=10, sticky='w')
-        bot.columnconfigure(11, weight=1)
+        ttk.Label(bot, textvariable=self.status_var).grid(row=0, column=14, padx=10, sticky='w')
+        bot.columnconfigure(14, weight=1)
 
         # Progress bar on its own row, full width
         prog_frame = ttk.Frame(self.root, padding=(10, 2, 10, 8))
@@ -310,8 +323,9 @@ class App:
     # ----- Run -----
     def cancel_sweep(self):
         self._cancel.set()
+        runner.kill_all_active()
         self.status_var.set('Cancelling…')
-        self.log('Cancel requested — finishing in-flight runs.')
+        self.log('Cancel requested — killing in-flight processes.')
 
     def run_sweep(self):
         if not self.asc_path_var.get() or not Path(self.asc_path_var.get()).exists():
@@ -376,15 +390,24 @@ class App:
                 if self._cancel.is_set():
                     self.root.after(0, lambda: self._finish('Cancelled', None))
                     return
-                files = output.write_csv(
-                    results,
-                    axes,
-                    Path(self.out_var.get()),
-                    self.basename_var.get() or 'sweep',
-                )
+                out_dir = Path(self.out_var.get())
+                bname = self.basename_var.get() or 'sweep'
+                files: list[Path] = []
+                export_errors: list[str] = []
+
+                if fmt_csv:
+                    files += output.write_csv(results, axes, out_dir, bname)
+                if fmt_mat:
+                    try:
+                        files += output.write_mat(results, axes, out_dir, bname)
+                    except Exception as mat_err:  # pylint: disable=broad-except
+                        export_errors.append(f'MAT export failed: {mat_err}')
+
                 ok = sum(1 for r in results if not r.get('error') and r.get('measurements'))
                 err_count = sum(1 for r in results if r.get('error'))
                 msg = f'Done. {ok} ok, {err_count} errors. Wrote {len(files)} file(s).'
+                if export_errors:
+                    msg += ' (' + '; '.join(export_errors) + ')'
                 detail = '\n'.join(f'  {f}' for f in files)
                 self.root.after(0, lambda: self._finish(msg, detail))
             except Exception as e:  # pylint: disable=broad-except
@@ -392,6 +415,8 @@ class App:
                 tb = traceback.format_exc()
                 self.root.after(0, lambda: self._finish(f'Failed: {e}', tb))
 
+        fmt_csv = self.fmt_csv_var.get()
+        fmt_mat = self.fmt_mat_var.get()
         threading.Thread(target=worker, daemon=True).start()
 
     def _fmt_run(self, values: dict[str, float]) -> str:
