@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.vscode/
+.idea/
+
+# LTSpice run artifacts (in case any escape cleanup)
+ltsweep_*.asc
+ltsweep_*.log
+ltsweep_*.raw
+ltsweep_*.net
+ltsweep_*.op.raw
+
+# User-generated sweep output
+sweep*.csv
