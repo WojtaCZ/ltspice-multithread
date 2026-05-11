@@ -21,6 +21,7 @@ DEFAULT_CONFIG_EXT = '.sweep.json'
 def find_ltspice_exe() -> str | None:
     candidates = [
         r'C:\Program Files\ADI\LTspice\LTspice.exe',
+        str(Path.home() / r'AppData\Local\Programs\ADI\LTspice\LTspice.exe'),
         r'C:\Program Files\LTC\LTspiceXVII\XVIIx64.exe',
         r'C:\Program Files (x86)\LTC\LTspiceXVII\XVIIx64.exe',
         r'C:\Program Files (x86)\LTC\LTspiceIV\scad3.exe',
