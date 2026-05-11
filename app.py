@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -362,6 +363,7 @@ class App:
         self.cancel_btn.config(state='normal')
         self.status_var.set(f'Running 0/{total}')
         self.log(f'Starting sweep: {total} combinations, {self.workers_var.get()} workers.')
+        _t0 = time.monotonic()
 
         def on_progress(done, tot):
             self.root.after(0, lambda: self._on_progress(done, tot))
@@ -402,7 +404,8 @@ class App:
 
                 ok = sum(1 for r in results if not r.get('error') and r.get('measurements'))
                 err_count = sum(1 for r in results if r.get('error'))
-                msg = f'Done. {ok} ok, {err_count} errors. Wrote {len(files)} file(s).'
+                elapsed = self._fmt_duration(time.monotonic() - _t0)
+                msg = f'Done. {ok} ok, {err_count} errors. Wrote {len(files)} file(s). Total runtime: {elapsed}.'
                 if export_errors:
                     msg += ' (' + '; '.join(export_errors) + ')'
                 detail = '\n'.join(f'  {f}' for f in files)
@@ -415,6 +418,17 @@ class App:
         fmt_csv = self.fmt_csv_var.get()
         fmt_mat = self.fmt_mat_var.get()
         threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _fmt_duration(seconds: float) -> str:
+        s = int(seconds)
+        if s < 60:
+            return f'{seconds:.1f}s'
+        m, s = divmod(s, 60)
+        if m < 60:
+            return f'{m}m {s}s'
+        h, m = divmod(m, 60)
+        return f'{h}h {m}m {s}s'
 
     def _fmt_run(self, values: dict[str, float]) -> str:
         return ', '.join(f'{k}={stepping.format_value(v)}' for k, v in values.items())

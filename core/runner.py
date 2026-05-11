@@ -89,12 +89,18 @@ def run_single(
     try:
         temp_asc.write_text(patched, encoding='utf-8')
 
+        # SW_SHOWMINNOACTIVE (7): start minimized without stealing focus.
+        _si = subprocess.STARTUPINFO()
+        _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        _si.wShowWindow = 7
+
         proc = subprocess.Popen(
             [ltspice_exe, '-b', str(temp_asc)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             cwd=str(asc_template.parent),
+            startupinfo=_si,
         )
         _register(proc)
 
