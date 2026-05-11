@@ -217,7 +217,7 @@ class App:
             else:
                 preview = self.preview(p)
                 axis_display = '—' if mat_mode else p.get('axis', 'rows')
-                tag = ('axis_na',) if mat_mode else ()
+                tag = ()
             self.tree.insert(
                 '',
                 'end',
