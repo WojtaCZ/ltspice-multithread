@@ -49,6 +49,7 @@ class App:
         root.bind_all('<Control-S>', lambda _e: self.save_setup())
         root.bind_all('<Control-o>', lambda _e: self.load_setup())
         root.bind_all('<Control-O>', lambda _e: self.load_setup())
+        root.protocol('WM_DELETE_WINDOW', self._on_close)
 
     def _build_ui(self):
         top = ttk.Frame(self.root, padding=10)
@@ -346,6 +347,11 @@ class App:
         dlg.bind('<Escape>', lambda _e: dlg.destroy())
 
     # ----- Run -----
+    def _on_close(self):
+        self._cancel.set()
+        runner.kill_all_active()
+        self.root.destroy()
+
     def cancel_sweep(self):
         self._cancel.set()
         runner.kill_all_active()
