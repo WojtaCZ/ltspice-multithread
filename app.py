@@ -77,7 +77,7 @@ class App:
         self.fmt_var = tk.StringVar(value=_fmt_default)
         ttk.Combobox(
             top, textvariable=self.fmt_var, values=_fmt_values, state='readonly', width=14,
-        ).grid(row=3, column=1, sticky='w', pady=2)
+        ).grid(row=3, column=1, sticky='w', padx=5, pady=2)
         self.fmt_var.trace_add('write', lambda *_: self.refresh_tree())
 
         mid = ttk.LabelFrame(self.root, text='Parameters (double-click row to edit)', padding=10)
