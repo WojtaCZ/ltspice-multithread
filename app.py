@@ -70,6 +70,12 @@ class App:
         self.out_var = tk.StringVar(value=str(Path.cwd()))
         ttk.Entry(top, textvariable=self.out_var).grid(row=2, column=1, sticky='ew', padx=5)
         ttk.Button(top, text='Browse…', command=self.browse_out).grid(row=2, column=2)
+        ttk.Label(top, text='Format:').grid(row=2, column=3, sticky='w', padx=(12, 2), pady=2)
+        _fmt_values = ['CSV', 'MAT (Octave)'] if output.SCIPY_AVAILABLE else ['CSV']
+        self.fmt_var = tk.StringVar(value='CSV')
+        ttk.Combobox(
+            top, textvariable=self.fmt_var, values=_fmt_values, state='readonly', width=14,
+        ).grid(row=2, column=4, sticky='w', pady=2)
 
         mid = ttk.LabelFrame(self.root, text='Parameters (double-click row to edit)', padding=10)
         mid.pack(fill='both', expand=True, padx=10, pady=5)
@@ -122,24 +128,11 @@ class App:
 
         ttk.Separator(bot, orient='vertical').grid(row=0, column=8, sticky='ns', padx=8)
 
-        self.fmt_csv_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(bot, text='CSV', variable=self.fmt_csv_var).grid(row=0, column=9, padx=2)
-
-        self.fmt_mat_var = tk.BooleanVar(value=False)
-        mat_cb = ttk.Checkbutton(bot, text='MAT (Octave)', variable=self.fmt_mat_var)
-        mat_cb.grid(row=0, column=10, padx=2)
-        if not output.SCIPY_AVAILABLE:
-            self.fmt_mat_var.set(False)
-            mat_cb.config(state='disabled')
-            mat_cb.config(text='MAT (needs scipy)')
-
-        ttk.Separator(bot, orient='vertical').grid(row=0, column=11, sticky='ns', padx=8)
-
         self.run_btn = ttk.Button(bot, text='Run sweep', command=self.run_sweep)
-        self.run_btn.grid(row=0, column=12)
+        self.run_btn.grid(row=0, column=9)
 
         self.cancel_btn = ttk.Button(bot, text='Cancel', command=self.cancel_sweep, state='disabled')
-        self.cancel_btn.grid(row=0, column=13, padx=5)
+        self.cancel_btn.grid(row=0, column=10, padx=5)
 
         # Status bar — pack before log so side='bottom' is claimed first
         self.status_var = tk.StringVar(value='Idle')
@@ -415,8 +408,9 @@ class App:
                 tb = traceback.format_exc()
                 self.root.after(0, lambda: self._finish(f'Failed: {e}', tb))
 
-        fmt_csv = self.fmt_csv_var.get()
-        fmt_mat = self.fmt_mat_var.get()
+        _fmt = self.fmt_var.get()
+        fmt_csv = _fmt == 'CSV'
+        fmt_mat = _fmt == 'MAT (Octave)'
         threading.Thread(target=worker, daemon=True).start()
 
     @staticmethod

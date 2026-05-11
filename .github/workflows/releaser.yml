@@ -1,0 +1,38 @@
+name: releaser
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller scipy numpy
+
+      - name: Build exe
+        run: >-
+          pyinstaller
+          --onefile
+          --windowed
+          --name LTSpiceMultiSweep
+          --collect-all scipy
+          app.py
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/LTSpiceMultiSweep.exe
+          generate_release_notes: true
