@@ -89,10 +89,11 @@ def run_single(
     try:
         temp_asc.write_text(patched, encoding='utf-8')
 
-        # SW_SHOWMINNOACTIVE (7): start minimized without stealing focus.
+        # SW_HIDE (0): suppress the window entirely in batch mode so that
+        # LTSpice cannot call SetForegroundWindow and steal keyboard focus.
         _si = subprocess.STARTUPINFO()
         _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        _si.wShowWindow = 7
+        _si.wShowWindow = 0
 
         proc = subprocess.Popen(
             [ltspice_exe, '-b', str(temp_asc)],
