@@ -25,7 +25,7 @@ def _safe_filename_part(v) -> str:
     return ''.join(c for c in safe if c.isalnum() or c in '_-') or 'x'
 
 
-def _collect_measurements(results: list[dict]) -> list[str]:
+def _collect_scalar_meas(results: list[dict]) -> list[str]:
     seen: list[str] = []
     s: set[str] = set()
     for r in results:
@@ -36,6 +36,48 @@ def _collect_measurements(results: list[dict]) -> list[str]:
     return seen
 
 
+def _collect_stepped_meas(results: list[dict]) -> list[str]:
+    seen: list[str] = []
+    s: set[str] = set()
+    for r in results:
+        for m in r.get('stepped_measurements', {}):
+            if m not in s:
+                s.add(m)
+                seen.append(m)
+    return seen
+
+
+def _collect_measurements(results: list[dict]) -> list[str]:
+    """All measurement names (scalar first, then stepped) in encounter order."""
+    seen: list[str] = []
+    s: set[str] = set()
+    for r in results:
+        for m in r.get('measurements', {}):
+            if m not in s:
+                s.add(m)
+                seen.append(m)
+    for r in results:
+        for m in r.get('stepped_measurements', {}):
+            if m not in s:
+                s.add(m)
+                seen.append(m)
+    return seen
+
+
+def _get_step_combos(results: list[dict]) -> list[dict[str, float]]:
+    """Return the most complete step_combos list found across all results."""
+    best: list[dict[str, float]] = []
+    for r in results:
+        sc = r.get('step_combos', [])
+        if len(sc) > len(best):
+            best = sc
+    return best
+
+
+def _step_label(combo: dict[str, float]) -> str:
+    return ','.join(f'{k}={format_value(v)}' for k, v in combo.items())
+
+
 def write_csv(
     results: list[dict],
     axes: dict[str, Axis],
@@ -44,7 +86,8 @@ def write_csv(
 ) -> list[Path]:
     """Write CSV file(s) based on per-parameter axis assignment.
 
-    Each entry in `results` has shape: {'values': {name: float}, 'measurements': {name: float}, ...}
+    Each entry in `results` has shape: {'values': {name: float}, 'measurements': {name: float},
+    'stepped_measurements': {name: [float,...]}, 'step_combos': [{name: float}, ...], ...}
     `axes` maps each parameter name to one of 'rows' | 'cols' | 'file'.
     Returns list of written file paths.
     """
@@ -55,7 +98,16 @@ def write_csv(
     row_params = [p for p, a in axes.items() if a == 'rows']
     col_params = [p for p, a in axes.items() if a == 'cols']
 
-    all_meas = _collect_measurements(results)
+    scalar_names = _collect_scalar_meas(results)
+    stepped_names = _collect_stepped_meas(results)
+    step_combos_all = _get_step_combos(results)
+
+    # Build the flat list of column measurement keys.
+    # Scalar: just the name.  Stepped: "name@step_label" for each step.
+    col_meas_keys: list[str] = list(scalar_names)
+    for m in stepped_names:
+        for combo in step_combos_all:
+            col_meas_keys.append(f'{m}@{_step_label(combo)}')
 
     # Group by file params
     groups: dict[tuple, list[dict]] = defaultdict(list)
@@ -77,26 +129,29 @@ def write_csv(
         row_keys = sorted({tuple(r['values'].get(p) for p in row_params) for r in grp})
         col_keys = sorted({tuple(r['values'].get(p) for p in col_params) for r in grp})
 
-        # Header
         header: list[str] = list(row_params)
         if col_params:
             for ck in col_keys:
                 ck_label = ', '.join(
                     f'{p}={format_value(v)}' for p, v in zip(col_params, ck)
                 )
-                for m in all_meas:
-                    header.append(f'{m} @ {ck_label}')
+                for mk in col_meas_keys:
+                    header.append(f'{mk} @ {ck_label}')
         else:
-            header.extend(all_meas)
+            header.extend(col_meas_keys)
 
-        # Optional: include any error info as a final column when no measurements at all
-        # (kept simple — errors are reported in the GUI log)
-
-        idx: dict[tuple, dict[str, float]] = {}
+        # Build per-(rk, ck) flat measurement dict that includes stepped values.
+        idx: dict[tuple, dict[str, float | str]] = {}
         for r in grp:
             rk = tuple(r['values'].get(p) for p in row_params)
             ck = tuple(r['values'].get(p) for p in col_params)
-            idx[(rk, ck)] = r.get('measurements', {})
+            flat: dict[str, float | str] = dict(r.get('measurements', {}))
+            sc = r.get('step_combos', step_combos_all)
+            for meas_name, vals in r.get('stepped_measurements', {}).items():
+                for si, val in enumerate(vals):
+                    if si < len(sc):
+                        flat[f'{meas_name}@{_step_label(sc[si])}'] = val
+            idx[(rk, ck)] = flat
 
         cks = col_keys if col_params else [()]
 
@@ -107,8 +162,8 @@ def write_csv(
                 row: list = [format_value(v) if isinstance(v, float) else (v if v is not None else '') for v in rk]
                 for ck in cks:
                     meas = idx.get((rk, ck), {})
-                    for m in all_meas:
-                        v = meas.get(m, '')
+                    for mk in col_meas_keys:
+                        v = meas.get(mk, '')
                         row.append(format_value(v) if isinstance(v, float) else v)
                 w.writerow(row)
         written.append(path)
@@ -132,14 +187,14 @@ def write_mat(
 ) -> list[Path]:
     """Write Octave/MATLAB .mat file(s) from sweep results.
 
-    Each swept parameter becomes one dimension of the output arrays.
-    Dimension order matches the parameter order in `axes`.
-    Parameters with axis='file' split the output into separate files.
+    Runner-swept parameters and any .step parameters found in the schematics
+    all become independent dimensions of the output arrays.
 
     Variables written into each .mat:
-      - One vector per swept parameter (its unique sorted values)
-      - One N-D array per measurement, indexed by parameter vectors
-      - A char array ``param_order`` listing the dimension order
+      - One vector per dimension parameter (unique sorted values)
+      - One N-D array per measurement, indexed by all dimension vectors
+      - ``param_order``: char array of dimension names in index order
+          (runner params first, then schematic .step params)
 
     Requires scipy (scipy.io.savemat) and numpy.
     """
@@ -155,7 +210,11 @@ def write_mat(
     # All non-file swept params become array dimensions, in declaration order.
     dim_params = [p for p, a in axes.items() if a != 'file']
 
-    all_meas = _collect_measurements(results)
+    scalar_names = _collect_scalar_meas(results)
+    stepped_names = _collect_stepped_meas(results)
+    # Deduplicated union: scalar first, then any stepped names not already present.
+    scalar_set = set(scalar_names)
+    all_meas = scalar_names + [m for m in stepped_names if m not in scalar_set]
 
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in results:
@@ -173,54 +232,90 @@ def write_mat(
             fname = f'{base_name}.mat'
         path = output_dir / fname
 
-        # Unique sorted values for each dimension parameter.
+        # Unique sorted values for each runner dimension parameter.
         dim_values: dict[str, list[float]] = {}
         for p in dim_params:
             vals = sorted({r['values'][p] for r in grp if p in r['values']})
             dim_values[p] = vals
 
-        if not dim_values:
-            # No swept params in this group; scalar measurements.
-            shape: tuple[int, ...] = (1,)
-            idx_map: dict[str, dict[float, int]] = {}
-        else:
-            shape = tuple(len(dim_values[p]) for p in dim_params)
-            idx_map = {
-                p: {v: i for i, v in enumerate(vals)}
-                for p, vals in dim_values.items()
-            }
+        runner_shape: tuple[int, ...] = (
+            tuple(len(dim_values[p]) for p in dim_params) if dim_params else ()
+        )
+        idx_map: dict[str, dict[float, int]] = (
+            {p: {v: i for i, v in enumerate(vals)} for p, vals in dim_values.items()}
+            if dim_params else {}
+        )
 
-        # Allocate NaN-filled arrays for each measurement.
-        meas_arrays: dict[str, object] = {
-            m: np.full(shape, np.nan) for m in all_meas
-        }
+        # Step params from the schematic .step directives (consistent across all runs).
+        step_combos_all = _get_step_combos(grp)
+        step_param_names: list[str] = list(step_combos_all[0].keys()) if step_combos_all else []
+        step_param_values: dict[str, list[float]] = {}
+        step_idx_map: dict[str, dict[float, int]] = {}
+        if step_param_names:
+            for key in step_param_names:
+                uniq = sorted({c[key] for c in step_combos_all})
+                step_param_values[key] = uniq
+                step_idx_map[key] = {v: i for i, v in enumerate(uniq)}
+
+        step_shape: tuple[int, ...] = tuple(len(step_param_values[p]) for p in step_param_names)
+
+        # All measurement arrays share the same shape = runner_shape + step_shape.
+        full_shape = runner_shape + step_shape
+        if not full_shape:
+            full_shape = (1,)
+
+        meas_arrays: dict[str, object] = {m: np.full(full_shape, np.nan) for m in all_meas}
 
         for r in grp:
+            # Runner-param indices into meas_arrays.
             if dim_params:
-                indices = tuple(
+                runner_indices: tuple[int, ...] = tuple(
                     idx_map[p][r['values'][p]]
                     for p in dim_params
                     if p in r['values'] and r['values'][p] in idx_map[p]
                 )
-                if len(indices) != len(dim_params):
-                    continue  # missing a dimension value, skip
+                if len(runner_indices) != len(dim_params):
+                    continue
             else:
-                indices = (0,)
-            for m in all_meas:
+                runner_indices = ()
+
+            # Scalar measurements: broadcast across all step positions.
+            for m in scalar_names:
                 val = r.get('measurements', {}).get(m)
-                if val is not None:
-                    meas_arrays[m][indices] = val  # type: ignore[index]
+                if val is None:
+                    continue
+                if step_param_names:
+                    sl: tuple = runner_indices + (slice(None),) * len(step_param_names)
+                    meas_arrays[m][sl] = val  # type: ignore[index]
+                else:
+                    meas_arrays[m][runner_indices if runner_indices else (0,)] = val  # type: ignore[index]
+
+            # Stepped measurements: one value per step combo.
+            r_step_combos = r.get('step_combos', step_combos_all)
+            for m in stepped_names:
+                vals_list = r.get('stepped_measurements', {}).get(m, [])
+                for si, val in enumerate(vals_list):
+                    if si >= len(r_step_combos):
+                        break
+                    combo = r_step_combos[si]
+                    try:
+                        step_indices: tuple[int, ...] = tuple(
+                            step_idx_map[p][combo[p]] for p in step_param_names
+                        )
+                    except KeyError:
+                        continue
+                    full_index = runner_indices + step_indices
+                    meas_arrays[m][full_index] = val  # type: ignore[index]
 
         mat: dict[str, object] = {}
-        # Parameter vectors.
         for p in dim_params:
             mat[_mat_safe_name(p)] = np.array(dim_values[p])
-        # Measurement arrays.
+        for p in step_param_names:
+            mat[_mat_safe_name(p)] = np.array(step_param_values[p])
         for m in all_meas:
             mat[_mat_safe_name(m)] = meas_arrays[m]
-        # Metadata: dimension order so the caller knows which axis is which.
         mat['param_order'] = np.array(
-            [_mat_safe_name(p) for p in dim_params], dtype=object
+            [_mat_safe_name(p) for p in dim_params + step_param_names], dtype=object
         )
 
         _savemat(str(path), mat, do_compression=True)

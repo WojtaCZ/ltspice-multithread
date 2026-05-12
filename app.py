@@ -113,7 +113,7 @@ class App:
         bot.pack(fill='x')
 
         ttk.Label(bot, text='Workers:').grid(row=0, column=0)
-        self.workers_var = tk.IntVar(value=max(1, (os.cpu_count() or 2) - 1))
+        self.workers_var = tk.IntVar(value=max(1, (os.cpu_count() or 4) // 2 - 1))
         ttk.Spinbox(bot, from_=1, to=64, textvariable=self.workers_var, width=5).grid(
             row=0, column=1, padx=(2, 15)
         )
@@ -436,7 +436,7 @@ class App:
                     except Exception as mat_err:  # pylint: disable=broad-except
                         export_errors.append(f'MAT export failed: {mat_err}')
 
-                ok = sum(1 for r in results if not r.get('error') and r.get('measurements'))
+                ok = sum(1 for r in results if not r.get('error') and (r.get('measurements') or r.get('stepped_measurements')))
                 err_count = sum(1 for r in results if r.get('error'))
                 elapsed = self._fmt_duration(time.monotonic() - _t0)
                 msg = f'Done. {ok} ok, {err_count} errors. Wrote {len(files)} file(s). Total runtime: {elapsed}.'
@@ -550,7 +550,7 @@ class App:
         self.exe_var.set(exe)
         self.out_var.set(cfg.get('output_dir', str(Path.cwd())))
         self.basename_var.set(cfg.get('basename', 'sweep'))
-        self.workers_var.set(int(cfg.get('workers', max(1, (os.cpu_count() or 4) // 2))))
+        self.workers_var.set(int(cfg.get('workers', max(1, (os.cpu_count() or 4) // 2 - 1))))
         self.timeout_var.set(int(cfg.get('timeout', 600)))
 
         params = cfg.get('params') or []

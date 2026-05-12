@@ -4,27 +4,119 @@
   "ltspice_exe": "C:/Users/vosahlov/AppData/Local/Programs/ADI/LTspice/LTspice.exe",
   "output_dir": "C:\\Users\\vosahlov\\Documents\\ltspice-multithread",
   "basename": "sweep",
-  "workers": 20,
-  "timeout": 600,
+  "workers": 12,
+  "timeout": 6000,
   "params": [
+    {
+      "name": "Vin",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
     {
       "name": "Rin",
       "kind": "list",
       "spec": "10 12 15 18 22 27 33 39 47 56 68 82 100 120 150 180 220 270 330 390 470 560 680 820 1k 1k2 1k5 2k2 2k7 3k3 3k9 4k7 5k6 6k8 8k2 10k 12k 15k 22k 27k 33k 39k 47k 56k 68k 100k",
-      "axis": "rows"
+      "axis": "rows",
+      "override": true
     },
     {
       "name": "Cin",
       "kind": "list",
       "spec": "100p 150p 220p 330p 470p 680p 1n 1n5 2n2 3n3 4n7 6n8 10n 15n 22n 33n 47n 68n 100n",
-      "axis": "cols"
+      "axis": "cols",
+      "override": true
     },
     {
       "name": "Ileak",
       "kind": "list",
-      "spec": "0 1u",
-      "axis": "cols"
+      "spec": "0 0.25u 0.5u 0.75u 1u",
+      "axis": "cols",
+      "override": true
+    },
+    {
+      "name": "Cadc",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "Radc",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_SMPL_CYCLES",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_CLOCK",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_PRESCALER",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_NBITS",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_NCHANNELS",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_VREF",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_SETTLE_THRESHOLD",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_LSB",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_PERIOD",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "ADC_SMPL_TIME",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "DATA_SAVE_START",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
+    },
+    {
+      "name": "MIN_TIME_STEP",
+      "kind": "list",
+      "axis": "rows",
+      "override": false
     }
-  
   ]
 }

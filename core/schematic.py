@@ -29,6 +29,9 @@ PARAM_NAME_VALUE_RE = re.compile(
     r'(\w+)\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|(?:(?!\\n)\S)+)'
 )
 
+# `.step param NAME ...` directive — captures the parameter name.
+STEP_PARAM_RE = re.compile(r'\.step\s+param\s+(\w+)', re.IGNORECASE)
+
 # Back-compat alias for any external callers.
 PARAM_RE = BRACE_RE
 
@@ -133,6 +136,18 @@ def find_parameters_with_defaults(asc_path: str | Path) -> dict[str, str | None]
         if name not in result:
             result[name] = None
     return result
+
+
+def find_step_param_names(text: str) -> list[str]:
+    """Return names from .step param directives in the schematic, preserving original case."""
+    seen: list[str] = []
+    seen_lower: set[str] = set()
+    for m in STEP_PARAM_RE.finditer(text):
+        name = m.group(1)
+        if name.lower() not in seen_lower:
+            seen_lower.add(name.lower())
+            seen.append(name)
+    return seen
 
 
 def substitute(text: str, values: dict[str, str]) -> str:

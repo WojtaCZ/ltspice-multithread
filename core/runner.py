@@ -13,6 +13,13 @@ from . import logparser, schematic, stepping
 
 TEMP_PREFIX = 'ltsweep_'
 
+# Windows ERROR_PAGEFILE_TOO_SMALL — raised by Popen when the commit limit
+# (RAM + pagefile) is temporarily exhausted even if physical RAM is free.
+# Retrying after a short back-off lets Windows reclaim commit space.
+_WINERROR_PAGEFILE = 1455
+_POPEN_RETRIES = 3   # additional attempts after the first failure
+_POPEN_RETRY_BASE = 2.0  # seconds; delay doubles each attempt (2 → 4 → 8)
+
 # --- Process registry for instant cancel ---
 _active_procs: set[subprocess.Popen] = set()
 _active_procs_lock = threading.Lock()
@@ -46,6 +53,21 @@ def _format_substitutions(values: dict[str, float]) -> dict[str, str]:
     return {k: stepping.format_value(v) for k, v in values.items()}
 
 
+def _popen(cmd: list[str], **kwargs) -> subprocess.Popen:
+    """Spawn a process, retrying on Windows ERROR_PAGEFILE_TOO_SMALL (1455)."""
+    last_exc: OSError | None = None
+    for attempt in range(_POPEN_RETRIES + 1):
+        if attempt:
+            time.sleep(_POPEN_RETRY_BASE * (2 ** (attempt - 1)))
+        try:
+            return subprocess.Popen(cmd, **kwargs)
+        except OSError as exc:
+            if getattr(exc, 'winerror', None) != _WINERROR_PAGEFILE:
+                raise
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
+
+
 def _cleanup(parent: Path, tag: str, retries: int = 5, delay: float = 0.3) -> None:
     """Delete every file whose name starts with `tag` in `parent`.
 
@@ -67,16 +89,19 @@ def _cleanup(parent: Path, tag: str, retries: int = 5, delay: float = 0.3) -> No
         time.sleep(delay)
 
 
+_EMPTY_RESULT = {'measurements': {}, 'stepped_measurements': {}, 'step_combos': []}
+
+
 def run_single(
     asc_template_path: str,
     values: dict[str, float],
     ltspice_exe: str,
     timeout: float = 600,
 ) -> dict:
-    """Run one LTSpice simulation. Returns {values, measurements, error, stderr}."""
+    """Run one LTSpice simulation. Returns {values, measurements, stepped_measurements, step_combos, error, stderr}."""
     # Skip immediately if cancel was already requested.
     if _cancel_flag.is_set():
-        return {'values': values, 'measurements': {}, 'error': 'cancelled', 'stderr': ''}
+        return {'values': values, **_EMPTY_RESULT, 'error': 'cancelled', 'stderr': ''}
 
     asc_template = Path(asc_template_path)
     template_text = asc_template.read_text(encoding='utf-8', errors='replace')
@@ -95,7 +120,7 @@ def run_single(
         _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         _si.wShowWindow = 0
 
-        proc = subprocess.Popen(
+        proc = _popen(
             [ltspice_exe, '-b', str(temp_asc)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -110,30 +135,46 @@ def run_single(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            return {'values': values, 'measurements': {}, 'error': 'timeout', 'stderr': ''}
+            return {'values': values, **_EMPTY_RESULT, 'error': 'timeout', 'stderr': ''}
 
         if _cancel_flag.is_set():
-            return {'values': values, 'measurements': {}, 'error': 'cancelled', 'stderr': ''}
+            return {'values': values, **_EMPTY_RESULT, 'error': 'cancelled', 'stderr': ''}
 
         log_file = temp_asc.with_suffix('.log')
         measurements: dict[str, float] = {}
+        stepped_measurements: dict[str, list[float]] = {}
+        step_combos: list[dict[str, float]] = []
         error: str | None = None
         if log_file.exists():
-            measurements = logparser.parse_log(log_file)
+            log_result = logparser.parse_log(log_file)
+            measurements = log_result.scalar
+            stepped_measurements = log_result.stepped
+            step_combos = log_result.step_combos
+            # LTSpice lowercases .step param names in the log; restore the
+            # original case from the schematic template.
+            step_names = schematic.find_step_param_names(template_text)
+            if step_names:
+                case_map = {n.lower(): n for n in step_names}
+                step_combos = [
+                    {case_map.get(k.lower(), k): v for k, v in combo.items()}
+                    for combo in step_combos
+                ]
         else:
             error = f'No log file produced (exit={proc.returncode})'
 
-        if proc.returncode != 0 and not measurements and not error:
+        if proc.returncode != 0 and not measurements and not stepped_measurements and not error:
             error = f'LTSpice exited {proc.returncode}'
 
         return {
             'values': values,
             'measurements': measurements,
+            'stepped_measurements': stepped_measurements,
+            'step_combos': step_combos,
             'error': error,
             'stderr': (stderr or '')[:500],
         }
     except Exception as e:  # pylint: disable=broad-except
-        return {'values': values, 'measurements': {}, 'error': str(e), 'stderr': ''}
+        return {'values': values, **_EMPTY_RESULT, 'error': str(e), 'stderr': ''}
     finally:
         if proc is not None:
             _deregister(proc)
@@ -173,7 +214,7 @@ def run_all(
             try:
                 r = fut.result()
             except Exception as e:  # pylint: disable=broad-except
-                r = {'values': futures[fut], 'measurements': {}, 'error': str(e), 'stderr': ''}
+                r = {'values': futures[fut], **_EMPTY_RESULT, 'error': str(e), 'stderr': ''}
             results.append(r)
             if on_result is not None:
                 try:
@@ -185,4 +226,9 @@ def run_all(
                     on_progress(len(results), total)
                 except Exception:  # pylint: disable=broad-except
                     pass
+
+    # All workers are done; do a final sweep for any files Windows kept locked
+    # while LTSpice processes were still alive (common with .db cache files).
+    _cleanup(Path(asc_path).parent, TEMP_PREFIX, retries=10, delay=0.5)
+
     return results
